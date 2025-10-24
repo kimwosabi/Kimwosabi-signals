@@ -1,44 +1,42 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
-# Initialize app
 app = FastAPI(title="Kimwosabi Forex Signal API", version="2.0")
 
-# Enable CORS for React frontend
+# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["http://localhost:3000"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database setup (PostgreSQL)
-DATABASE_URL = "postgresql+psycopg2://sabifx_user:hCfV8l2sWyZ1Ib04dIkvBvgkpPcxjTYs@dpg-d3t1o01r0fns738se45g-a.oregon-postgres.render.com/sabifx"
-
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./signals.db")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Database Model
+# --- Database Model ---
 class SignalDB(Base):
     __tablename__ = "signals"
     id = Column(Integer, primary_key=True, index=True)
-    pair = Column(String, index=True)
+    pair = Column(String)
     direction = Column(String)
     entry_price = Column(Float)
     stop_loss = Column(Float)
     take_profit = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
-# Create DB tables
 Base.metadata.create_all(bind=engine)
 
-# Pydantic model (for request validation)
+# --- Pydantic Models ---
 class Signal(BaseModel):
     pair: str
     direction: str
@@ -47,21 +45,29 @@ class Signal(BaseModel):
     take_profit: float
     timestamp: datetime
 
-@app.get("/")
-def home():
-    return {"message": "Welcome to Kimwosabi Forex Signal API"}
+class AdminLogin(BaseModel):
+    email: str
+    password: str
+
+# --- Routes ---
+
+@app.post("/admin/login")
+def admin_login(credentials: AdminLogin):
+    """
+    Admin login endpoint.
+    """
+    if credentials.email == "admin@sabi.tech" and credentials.password == "Sabi@2025":
+        return {"status": "success", "message": "Admin login successful"}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 @app.post("/signal")
 def create_signal(signal: Signal):
+    """
+    Create a new trading signal.
+    """
     db = SessionLocal()
-    db_signal = SignalDB(
-        pair=signal.pair,
-        direction=signal.direction,
-        entry_price=signal.entry_price,
-        stop_loss=signal.stop_loss,
-        take_profit=signal.take_profit,
-        timestamp=signal.timestamp,
-    )
+    db_signal = SignalDB(**signal.dict())
     db.add(db_signal)
     db.commit()
     db.refresh(db_signal)
@@ -70,6 +76,9 @@ def create_signal(signal: Signal):
 
 @app.get("/signals")
 def get_signals():
+    """
+    Get all signals.
+    """
     db = SessionLocal()
     signals = db.query(SignalDB).all()
     db.close()
